@@ -1,0 +1,14 @@
+## Interface: 16001
+## Title: SpellInfo
+## Notes: Spell information overlays for action-bar icons
+## Author: Chris Yeomans
+## Version: 0.0.1
+## RequiredDeps:
+## X-Curse-Project-ID: 1701163
+## SavedVariables: SpellInfoDB
+## SavedVariablesPerCharacter:
+
+AbilityManaCostIcon.lua
+AbilitySpellDamageIcon.lua
+SpellMetricsTooltip.lua
+SpellInfoOptions.lua
