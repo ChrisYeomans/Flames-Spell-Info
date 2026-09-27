@@ -62,18 +62,20 @@ local function formatMetric(value)
 	return string.format("%.2f", value)
 end
 
+local function formatCoefficient(baseCoefficient, effectiveCoefficient)
+	local baseText = string.format("%.1f%%", baseCoefficient * 100)
+	if math.abs(baseCoefficient - effectiveCoefficient) < 0.000001 then
+		return baseText
+	end
+	return baseText .. " (" .. string.format("%.1f%% effective", effectiveCoefficient * 100) .. ")"
+end
+
 local function getCurrentMana()
 	return SpellInfo.CurrentMana, SpellInfo.ManaIsEstimated
 end
 
 local manaTracker = CreateFrame("Frame")
-manaTracker:SetScript("OnUpdate", function(_, elapsed)
-	manaTracker.elapsed = (manaTracker.elapsed or 0) + elapsed
-	if manaTracker.elapsed < 0.2 then
-		return
-	end
-	manaTracker.elapsed = 0
-
+local function updateManaEstimate()
 	if not UnitPower then
 		return
 	end
@@ -93,7 +95,20 @@ manaTracker:SetScript("OnUpdate", function(_, elapsed)
 			SpellInfo.ManaIsEstimated = true
 		end
 	end
-end)
+end
+
+if C_Timer and C_Timer.NewTicker then
+	C_Timer.NewTicker(1, updateManaEstimate)
+else
+	manaTracker:SetScript("OnUpdate", function(_, elapsed)
+		manaTracker.elapsed = (manaTracker.elapsed or 0) + elapsed
+		if manaTracker.elapsed < 1 then
+			return
+		end
+		manaTracker.elapsed = 0
+		updateManaEstimate()
+	end)
+end
 
 local function addSpellMetrics(gameTooltip)
 	if not gameTooltip or gameTooltip == SpellInfo.DamageAnalysisTooltip
@@ -118,7 +133,8 @@ local function addSpellMetrics(gameTooltip)
 	local showSustained = not SpellInfo.GetOption or SpellInfo.GetOption("showSustained")
 	local showOOM = not SpellInfo.GetOption or SpellInfo.GetOption("showOOM")
 	local showCasts = not SpellInfo.GetOption or SpellInfo.GetOption("showCasts")
-	if not showEfficiency and not showSustained and not showOOM and not showCasts then
+	local showCoefficient = not SpellInfo.GetOption or SpellInfo.GetOption("showCoefficient")
+	if not showEfficiency and not showSustained and not showOOM and not showCasts and not showCoefficient then
 		return
 	end
 
@@ -127,6 +143,19 @@ local function addSpellMetrics(gameTooltip)
 	end
 
 	gameTooltip:AddLine("Spell Metrics", 1, 0.82, 0.25)
+	if showCoefficient and SpellInfo.GetSpellCoefficient then
+		local damageBase, damageEffective = SpellInfo.GetSpellCoefficient(spellID, false)
+		local healingBase, healingEffective = SpellInfo.GetSpellCoefficient(spellID, true)
+		if damageBase and healingBase and (healing or alternateHealing) then
+			addMetricLine("Damage SP Coeff", formatCoefficient(damageBase, damageEffective), { 1, 0.75, 0.3 })
+			addMetricLine("Healing SP Coeff", formatCoefficient(healingBase, healingEffective), { 0.35, 1, 0.55 })
+		elseif healing and healingBase then
+			addMetricLine("SP Coeff", formatCoefficient(healingBase, healingEffective), { 0.35, 1, 0.55 })
+		elseif damageBase then
+			addMetricLine("SP Coeff", formatCoefficient(damageBase, damageEffective), { 1, 0.75, 0.3 })
+		end
+	end
+
 	local currentMana, manaIsEstimated = getCurrentMana()
 	local castsUntilOOM = currentMana and math.floor(currentMana / manaCost)
 	local estimateSuffix = manaIsEstimated and " (full mana)" or ""
@@ -166,7 +195,14 @@ local function addSpellMetrics(gameTooltip)
 end
 
 if GameTooltip and GameTooltip.HookScript then
-	GameTooltip:HookScript("OnUpdate", function(gameTooltip)
+	local tooltipCheckElapsed = 0
+	GameTooltip:HookScript("OnUpdate", function(gameTooltip, elapsed)
+		tooltipCheckElapsed = tooltipCheckElapsed + elapsed
+		if tooltipCheckElapsed < 0.2 then
+			return
+		end
+		tooltipCheckElapsed = 0
+
 		if not gameTooltip:IsShown() or gameTooltip == SpellInfo.DamageAnalysisTooltip
 			or not gameTooltip.GetSpell then
 			return

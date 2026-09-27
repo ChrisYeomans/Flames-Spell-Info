@@ -2,7 +2,7 @@
 ## Title: SpellInfo
 ## Notes: Spell information overlays for action-bar icons
 ## Author: Chris Yeomans
-## Version: 0.0.2
+## Version: 0.0.3
 ## RequiredDeps:
 ## X-Curse-Project-ID: 1701163
 ## SavedVariables: SpellInfoDB
@@ -10,6 +10,7 @@
 
 AbilityManaCostIcon.lua
 SpellDamageTextParser.lua
+SpellPowerCoefficients.lua
 AbilitySpellDamageIcon.lua
 SpellMetricsTooltip.lua
 SpellInfoOptions.lua

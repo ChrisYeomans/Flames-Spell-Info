@@ -17,8 +17,27 @@ local descriptions = {
 	[16] = "Heals a friendly target for 80 to 94 and another 91 over 21 sec.",
 	[17] = "Creates a violent storm in the target area causing 68 Nature damage to enemies every 1 sec, and increasing the time between attacks of enemies by 20%. Lasts 10 sec. Druid must channel to maintain the spell.",
 	[18] = "Regenerates all nearby party members within 20 yards for 285 every 2 sec for 10 sec. Druid must channel to maintain the spell.",
+	[19] = "Heals the target for 100.",
+	[20] = "Heals the target for 100.",
+	[31] = "An instant strike that causes 29 weapon damage plus an additional 5 to 7 Holy damage.",
 }
-
+local spellNames = {
+	[2] = "Fireball",
+	[8] = "Holy Shock",
+	[19] = "Healing Touch",
+	[20] = "Holy Light",
+	[31] = "Holy Strike",
+	[21] = "Flash of Light",
+	[22] = "Healing Wave",
+	[23] = "Lesser Healing Wave",
+	[24] = "Chain Heal",
+	[25] = "Flash Heal",
+	[26] = "Greater Healing",
+	[27] = "Renew",
+	[28] = "Prayer of Healing",
+	[29] = "Regrowth",
+	[30] = "Rejuvenation",
+}
 local function createFrame()
 	return {
 		SetOwner = function() end,
@@ -34,10 +53,28 @@ C_Spell = {
 	GetSpellDescription = function(spellID)
 		return descriptions[spellID]
 	end,
+	GetSpellInfo = function(spellID)
+		return { name = spellNames[spellID], castTime = spellID == 19 and 1500 or 0 }
+	end,
 }
+GetSpellBonusDamage = function()
+	return 0
+end
+GetSpellBonusHealing = function()
+	return 0
+end
 
 dofile("SpellDamageTextParser.lua")
+dofile("SpellPowerCoefficients.lua")
 dofile("AbilitySpellDamageIcon.lua")
+dofile("SpellInfoOptions.lua")
+assert(SpellInfo.GetOption("showCoefficient") == false, "spell power coefficient display should default off")
+SpellInfoDB.showCoefficient = true
+
+for _, spellID in ipairs({ 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 }) do
+	assert(SpellInfo.GetSpellCoefficient(spellID, true), "healing spell should have a healing coefficient")
+	assert(not SpellInfo.GetSpellCoefficient(spellID, false), "healing-only spell should not have a damage coefficient")
+end
 
 local tests = {
 	{ spellID = 1, expectedDamage = 6, expectedHealing = false },
@@ -58,6 +95,9 @@ local tests = {
 	{ spellID = 16, spellName = "Regrowth", expectedDamage = 178, expectedHealing = true },
 	{ spellID = 17, spellName = "Hurricane", expectedDamage = 680, expectedHealing = false, expectedDuration = 10 },
 	{ spellID = 18, spellName = "Tranquility", expectedDamage = 1425, expectedHealing = true, expectedDuration = 10 },
+	{ spellID = 19, spellName = "Healing Touch", expectedDamage = 100, expectedHealing = true },
+	{ spellID = 20, spellName = "Holy Light", expectedDamage = 100, expectedHealing = true },
+	{ spellID = 31, spellName = "Holy Strike", expectedDamage = 6, expectedHealing = false },
 }
 
 for _, test in ipairs(tests) do
@@ -96,7 +136,10 @@ C_Spell.GetSpellPowerCost = function(spellID)
 	return { { type = 0, cost = manaCosts[spellID] or 160 } }
 end
 C_Spell.GetSpellInfo = function(spellID)
-	return { castTime = (spellID == 9 or spellID == 14 or spellID == 16) and 2000 or 0 }
+	return {
+		name = spellNames[spellID],
+		castTime = spellID == 19 and 1500 or (spellID == 9 or spellID == 14 or spellID == 16) and 2000 or 0,
+	}
 end
 
 local tooltipScripts = {}
@@ -104,7 +147,9 @@ local metricValues = {}
 local currentSpellID = 8
 GameTooltip = {
 	HookScript = function(_, script, callback)
-		tooltipScripts[script] = callback
+		tooltipScripts[script] = function(gameTooltip)
+			callback(gameTooltip, 0.2)
+		end
 	end,
 	IsShown = function()
 		return true
@@ -133,6 +178,8 @@ end
 
 assert(metricValues.DPM == "0.86", "Holy Shock DPM should use its damage amount")
 assert(metricValues.HPM == "0.73", "Holy Shock HPM should use its healing amount")
+assert(metricValues["Damage SP Coeff"] == "42.9%", "Holy Shock tooltip should show its damage coefficient")
+assert(metricValues["Healing SP Coeff"] == "42.9%", "Holy Shock tooltip should show its healing coefficient")
 print("Passed Holy Shock tooltip metric test.")
 
 currentSpellID = 9
@@ -205,3 +252,54 @@ assert(metricValues.HPM == "1.54", "Tranquility HPM should include all five heal
 assert(metricValues.HPS == "142", "Tranquility HPS should use its 10-second duration")
 assert(metricValues.HOOM == "1425", "Tranquility HOOM should include all five healing ticks")
 print("Passed Tranquility tooltip metric test.")
+
+GetSpellBonusDamage = function(school)
+	return school == 3 and 100 or 0
+end
+local fireballAtLowLevel = SpellInfo.GetSpellDamage(2)
+assert(fireballAtLowLevel == 120, "Fireball amount should come from its tooltip, without added spell power")
+local fireballBaseCoefficient, fireballEffectiveCoefficient = SpellInfo.GetSpellCoefficient(2, false)
+assert(fireballBaseCoefficient == 1 and fireballEffectiveCoefficient == 1,
+	"Fireball should not receive a learned-level coefficient penalty")
+
+GetSpellBonusDamage = function(school)
+	return school == 2 and 100 or 0
+end
+GetSpellBonusHealing = function()
+	return 200
+end
+local holyShockDamage, _, holyShockHealing = SpellInfo.GetSpellDamage(8)
+assert(holyShockDamage == 137.5, "Holy Shock damage should not have spell power added to its tooltip amount")
+assert(holyShockHealing == 117.5, "Holy Shock healing should not have healing power added to its tooltip amount")
+
+GetSpellBonusDamage = function(school)
+	return school == 2 and 4 or 0
+end
+GetSpellBonusHealing = function()
+	return 4
+end
+local rankThreeHolyLight = SpellInfo.GetSpellDamage(20)
+local holyLightBaseCoefficient, holyLightEffectiveCoefficient = SpellInfo.GetSpellCoefficient(20, true)
+assert(rankThreeHolyLight == 100, "Holy Light amount should come from its tooltip, without added spell power")
+assert(holyLightBaseCoefficient == 0.714 and holyLightEffectiveCoefficient == 0.714,
+	"Rank 3 Holy Light should retain its observed 71.4% coefficient at level 17")
+assert(SpellInfo.GetSpellCoefficient(20, false) == nil, "Holy Light should not expose a damage coefficient")
+
+currentSpellID = 20
+metricValues = {}
+tooltipScripts.OnUpdate(GameTooltip)
+assert(metricValues["SP Coeff"] == "71.4%", "Holy Light tooltip should show its healing coefficient")
+assert(metricValues["Damage SP Coeff"] == nil, "Holy Light tooltip should not show a damage coefficient")
+
+GetSpellBonusHealing = function()
+	return 200
+end
+local healingTouchWithPower = SpellInfo.GetSpellDamage(19)
+assert(healingTouchWithPower == 100, "Healing Touch amount should not have healing power added to its tooltip amount")
+
+GetSpellBonusDamage = function(school)
+	return school == 2 and 9 or 0
+end
+local holyStrikeWithPower = SpellInfo.GetSpellDamage(31)
+assert(holyStrikeWithPower == 6, "Holy Strike should use only its 5-to-7 Holy damage midpoint")
+print("Passed coefficient tests.")

@@ -87,6 +87,14 @@ local function updateButton(button)
 	if not button then
 		return
 	end
+	if SpellInfo.GetOption and not SpellInfo.GetOption("showManaCost") then
+		local existingOverlay = manaCostOverlays[button]
+		if existingOverlay then
+			existingOverlay:SetText("")
+			existingOverlay:SetShown(false)
+		end
+		return
+	end
 
 	local overlay = manaCostOverlays[button]
 	if not overlay then
@@ -156,12 +164,20 @@ addon:SetScript("OnEvent", function(_, event)
 	updateActionButtons()
 end)
 
-local refreshTimer = 0
-addon:SetScript("OnUpdate", function(_, elapsed)
-	refreshTimer = refreshTimer + elapsed
-	if refreshTimer >= 0.5 then
-		refreshTimer = 0
-		hookKnownActionButtons()
-		updateActionButtons()
-	end
-end)
+local function refreshActionButtons()
+	hookKnownActionButtons()
+	updateActionButtons()
+end
+
+if C_Timer and C_Timer.NewTicker then
+	C_Timer.NewTicker(2, refreshActionButtons)
+else
+	local refreshTimer = 0
+	addon:SetScript("OnUpdate", function(_, elapsed)
+		refreshTimer = refreshTimer + elapsed
+		if refreshTimer >= 2.3 then
+			refreshTimer = 0
+			refreshActionButtons()
+		end
+	end)
+end
