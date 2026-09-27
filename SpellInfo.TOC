@@ -2,7 +2,7 @@
 ## Title: SpellInfo
 ## Notes: Spell information overlays for action-bar icons
 ## Author: Chris Yeomans
-## Version: 0.0.1
+## Version: 0.0.2
 ## RequiredDeps:
 ## X-Curse-Project-ID: 1701163
 ## SavedVariables: SpellInfoDB
