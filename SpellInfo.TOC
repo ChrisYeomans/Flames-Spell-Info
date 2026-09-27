@@ -9,6 +9,7 @@
 ## SavedVariablesPerCharacter:
 
 AbilityManaCostIcon.lua
+SpellDamageTextParser.lua
 AbilitySpellDamageIcon.lua
 SpellMetricsTooltip.lua
 SpellInfoOptions.lua

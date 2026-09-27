@@ -106,20 +106,14 @@ local function addSpellMetrics(gameTooltip)
 	if not spellID or (issecretvalue and issecretvalue(spellID)) then
 		return
 	end
-	local effect, healing = SpellInfo.GetSpellDamage(spellID)
+	local effect, healing, alternateHealing, effectDuration = SpellInfo.GetSpellDamage(spellID)
 	local manaCost = getManaCost(spellID)
 	local castTime = getCastTime(spellID)
 	if not effect or not manaCost or not castTime then
 		return
 	end
 
-	local castInterval = math.max(castTime, 1.5)
-	local effectPerMana = effect / manaCost
-	local effectPerSecond = effect / castInterval
-	local perManaLabel = healing and "HPM" or "DPM"
-	local perSecondLabel = healing and "HPS" or "DPS"
-	local untilOOMLabel = healing and "HOOM" or "DOOM"
-	local metricColor = healing and { 0.35, 1, 0.55 } or { 1, 0.75, 0.3 }
+	local castInterval = math.max(castTime, effectDuration or 0, 1.5)
 	local showEfficiency = not SpellInfo.GetOption or SpellInfo.GetOption("showEfficiency")
 	local showSustained = not SpellInfo.GetOption or SpellInfo.GetOption("showSustained")
 	local showOOM = not SpellInfo.GetOption or SpellInfo.GetOption("showOOM")
@@ -133,25 +127,36 @@ local function addSpellMetrics(gameTooltip)
 	end
 
 	gameTooltip:AddLine("Spell Metrics", 1, 0.82, 0.25)
-	if showEfficiency then
-		addMetricLine(perManaLabel, formatMetric(effectPerMana), metricColor)
+	local currentMana, manaIsEstimated = getCurrentMana()
+	local castsUntilOOM = currentMana and math.floor(currentMana / manaCost)
+	local estimateSuffix = manaIsEstimated and " (full mana)" or ""
+	local function addEffectMetrics(effectValue, isHealing)
+		local effectPerMana = effectValue / manaCost
+		local effectPerSecond = effectValue / castInterval
+		local perManaLabel = isHealing and "HPM" or "DPM"
+		local perSecondLabel = isHealing and "HPS" or "DPS"
+		local untilOOMLabel = isHealing and "HOOM" or "DOOM"
+		local metricColor = isHealing and { 0.35, 1, 0.55 } or { 1, 0.75, 0.3 }
+
+		if showEfficiency then
+			addMetricLine(perManaLabel, formatMetric(effectPerMana), metricColor)
+		end
+		if showSustained then
+			addMetricLine(perSecondLabel, formatMetric(effectPerSecond), metricColor)
+		end
+		if showOOM and castsUntilOOM then
+			local effectUntilOOM = effectValue * castsUntilOOM
+			addMetricLine(untilOOMLabel .. estimateSuffix, formatMetric(effectUntilOOM), metricColor)
+		elseif showOOM then
+			addMetricLine(untilOOMLabel, "unavailable", { 0.65, 0.65, 0.65 })
+		end
 	end
-	if showSustained then
-		addMetricLine(perSecondLabel, formatMetric(effectPerSecond), metricColor)
+	addEffectMetrics(effect, healing)
+	if alternateHealing then
+		addEffectMetrics(alternateHealing, true)
 	end
 
-	local currentMana, manaIsEstimated = getCurrentMana()
-	if showOOM and currentMana then
-		local castsUntilOOM = math.floor(currentMana / manaCost)
-		local effectUntilOOM = effect * castsUntilOOM
-		local estimateSuffix = manaIsEstimated and " (full mana)" or ""
-		addMetricLine(untilOOMLabel .. estimateSuffix, formatMetric(effectUntilOOM), metricColor)
-	elseif showOOM then
-		addMetricLine(untilOOMLabel, "unavailable", { 0.65, 0.65, 0.65 })
-	end
 	if showCasts and currentMana then
-		local castsUntilOOM = math.floor(currentMana / manaCost)
-		local estimateSuffix = manaIsEstimated and " (full mana)" or ""
 		addMetricLine("Casts to OOM" .. estimateSuffix, tostring(castsUntilOOM), { 0.9, 0.9, 0.9 })
 	elseif showCasts then
 		addMetricLine("Casts to OOM", "unavailable", { 0.65, 0.65, 0.65 })
