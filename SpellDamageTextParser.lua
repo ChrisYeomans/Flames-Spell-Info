@@ -1,14 +1,5 @@
 SpellInfo = SpellInfo or {}
 
-local function getNumbers(text)
-	local numbers = {}
-	for number in string.gmatch(text, "%d[%d,]*") do
-		local cleanedNumber = string.gsub(number, ",", "")
-		numbers[#numbers + 1] = tonumber(cleanedNumber)
-	end
-	return numbers
-end
-
 local function isReadableText(text)
 	return text and (not issecretvalue or not issecretvalue(text))
 end
@@ -39,6 +30,11 @@ local function findDamage(text, requireDamageWord)
 		or string.find(lowerText, "causes?%s+%d")
 		or string.find(lowerText, "causing%s+%d")
 		or string.find(lowerText, "dealing%s+%d")
+		or string.find(lowerText, "doing%s+%d")
+		or string.find(lowerText, "does%s+%d")
+		or string.find(lowerText, "do%s+%d")
+		or string.find(lowerText, "increases?%s+.-damage%s+by%s+%d")
+		or string.find(lowerText, "next%s+attack%s+by%s+%d[%d,]*[^%d%.%%]*damage")
 		or string.find(lowerText, "take%s+%d[^%d%.%%]*damage")
 		or string.find(lowerText, "struck%s+for%s+%d")
 		or string.find(lowerText, "for%s+%d[%d,]*[^%d%.%%]*damage")
@@ -79,6 +75,7 @@ local function findDamage(text, requireDamageWord)
 			initialLow, initialHigh = string.match(lowerText, "(%d[%d,]*)%s+to%s+(%d[%d,]*)[^%d%.%%]*damage%s+and%s+an additional%s+%d")
 		end
 		local initialDamage
+		local hasAverageDamage = initialLow ~= nil
 		if initialLow and initialHigh then
 			initialDamage = (tonumber((string.gsub(initialLow, ",", ""))) + tonumber((string.gsub(initialHigh, ",", "")))) / 2
 		else
@@ -88,7 +85,13 @@ local function findDamage(text, requireDamageWord)
 		end
 		local damageOverTime = string.match(lowerText, "additional%s+(%d[%d,]*)[^%d%.%%]*damage%s+over%s+%d")
 		if initialDamage and damageOverTime then
-			return initialDamage + tonumber((string.gsub(damageOverTime, ",", "")))
+			return initialDamage + tonumber((string.gsub(damageOverTime, ",", ""))),
+				nil, hasAverageDamage
+		end
+
+		local totalDamageOverTime, damageDuration = string.match(lowerText, "(%d[%d,]*)%s*[%a%s%-]*damage%s+over%s+(%d[%d,]*)%s*sec")
+		if totalDamageOverTime and damageDuration then
+			return tonumber((string.gsub(totalDamageOverTime, ",", ""))), tonumber((string.gsub(damageDuration, ",", "")))
 		end
 
 		for number in string.gmatch(lowerText, "deals?%s+an additional%s+(%d[%d,]*)[^%d%.%%]*damage") do
@@ -96,11 +99,13 @@ local function findDamage(text, requireDamageWord)
 		end
 
 		for low, high in string.gmatch(lowerText, "(%d[%d,]*)%s+to%s+(%d[%d,]*)[^%d%.%%]*damage") do
-			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2
+			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2,
+				nil, true
 		end
 
 		for low, high in string.gmatch(lowerText, "(%d[%d,]*)%s*%-%s*(%d[%d,]*)[^%d%.%%]*damage") do
-			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2
+			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2,
+				nil, true
 		end
 
 		for number in string.gmatch(lowerText, "deals?%s+(%d[%d,]*)[^%d%.%%]*damage") do
@@ -121,6 +126,28 @@ local function findDamage(text, requireDamageWord)
 
 		for number in string.gmatch(lowerText, "dealing%s+(%d[%d,]*)[^%d%.%%]*damage") do
 			return tonumber((string.gsub(number, ",", "")))
+		end
+
+		for number in string.gmatch(lowerText, "doing%s+(%d[%d,]*)[^%d%.%%]*damage") do
+			return tonumber((string.gsub(number, ",", "")))
+		end
+
+		for number in string.gmatch(lowerText, "does%s+(%d[%d,]*)[^%d%.%%]*damage") do
+			return tonumber((string.gsub(number, ",", "")))
+		end
+
+		for number in string.gmatch(lowerText, "do%s+(%d[%d,]*)[^%d%.%%]*damage") do
+			return tonumber((string.gsub(number, ",", "")))
+		end
+
+		local increasedDamage = string.match(lowerText, "increases?%s+.-damage%s+by%s+(%d[%d,]*)")
+		if increasedDamage then
+			return tonumber((string.gsub(increasedDamage, ",", "")))
+		end
+
+		local nextAttackDamage = string.match(lowerText, "next%s+attack%s+by%s+(%d[%d,]*)[^%d%.%%]*damage")
+		if nextAttackDamage then
+			return tonumber((string.gsub(nextAttackDamage, ",", "")))
 		end
 
 		for number in string.gmatch(lowerText, "take%s+(%d[%d,]*)[^%d%.%%]*damage") do
@@ -154,11 +181,19 @@ local function findDamage(text, requireDamageWord)
 		local healOverTime = string.match(lowerText, "and%s+another%s+(%d[%d,]*)[^%d%.%%]*over%s+%d")
 		if directHealLow and directHealHigh and healOverTime then
 			local directHeal = (tonumber((string.gsub(directHealLow, ",", ""))) + tonumber((string.gsub(directHealHigh, ",", "")))) / 2
-			return directHeal + tonumber((string.gsub(healOverTime, ",", "")))
+			return directHeal + tonumber((string.gsub(healOverTime, ",", ""))), nil, true
+		end
+
+		if not string.find(lowerText, "and%s+another%s+%d") then
+			local totalHealingOverTime = string.match(lowerText, "(%d[%d,]*)%s*[%a%s%-]*over%s+(%d[%d,]*)%s*sec")
+			if totalHealingOverTime then
+				return tonumber((string.gsub(totalHealingOverTime, ",", "")))
+			end
 		end
 
 		for low, high in string.gmatch(lowerText, "heals?%s+.-of%s+(%d[%d,]*)%s+to%s+(%d[%d,]*)[^%d%.%%]*damage") do
-			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2
+			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2,
+				nil, true
 		end
 
 		for number in string.gmatch(lowerText, "heals?%s+.-of%s+(%d[%d,]*)[^%d%.%%]*damage") do
@@ -166,11 +201,13 @@ local function findDamage(text, requireDamageWord)
 		end
 
 		for low, high in string.gmatch(lowerText, "heals?%s+.-for%s+(%d[%d,]*)%s+to%s+(%d[%d,]*)") do
-			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2
+			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2,
+				nil, true
 		end
 
 		for low, high in string.gmatch(lowerText, "heals?%s+.-for%s+(%d[%d,]*)%s*%-%s*(%d[%d,]*)") do
-			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2
+			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2,
+				nil, true
 		end
 
 		for number in string.gmatch(lowerText, "heals?%s+.-for%s+(%d[%d,]*)") do
@@ -178,11 +215,13 @@ local function findDamage(text, requireDamageWord)
 		end
 
 		for low, high in string.gmatch(lowerText, "absorbs?%s+(%d[%d,]*)%s+to%s+(%d[%d,]*)[^%d%.%%]*damage") do
-			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2
+			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2,
+				nil, true
 		end
 
 		for low, high in string.gmatch(lowerText, "absorbing%s+(%d[%d,]*)%s+to%s+(%d[%d,]*)[^%d%.%%]*damage") do
-			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2
+			return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2,
+				nil, true
 		end
 
 		for number in string.gmatch(lowerText, "absorbs?%s+(%d[%d,]*)[^%d%.%%]*damage") do
@@ -193,12 +232,6 @@ local function findDamage(text, requireDamageWord)
 			return tonumber((string.gsub(number, ",", "")))
 		end
 
-		local numbers = getNumbers(text)
-		if #numbers >= 2 then
-			return (numbers[1] + numbers[2]) / 2
-		elseif #numbers == 1 then
-			return numbers[1]
-		end
 	end
 
 	return nil
@@ -227,11 +260,13 @@ local function findHealingAmount(text)
 
 	local lowerText = string.lower(text)
 	for low, high in string.gmatch(lowerText, "(%d[%d,]*)%s+to%s+(%d[%d,]*)%s+healing") do
-		return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2
+		return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2,
+			true
 	end
 
 	for low, high in string.gmatch(lowerText, "(%d[%d,]*)%s*%-%s*(%d[%d,]*)%s+healing") do
-		return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2
+		return (tonumber((string.gsub(low, ",", ""))) + tonumber((string.gsub(high, ",", "")))) / 2,
+			true
 	end
 
 	for number in string.gmatch(lowerText, "(%d[%d,]*)%s+healing") do
@@ -242,13 +277,14 @@ local function findHealingAmount(text)
 end
 
 local function parseSpellEffect(text)
-	local effect, effectDuration = findDamage(text, true)
-	local healingAmount = findHealingAmount(text)
+	local effect, effectDuration, effectIsAverage = findDamage(text, true)
+	local healingAmount, healingIsAverage = findHealingAmount(text)
 	if effect then
 		local healing = isHealingText(text)
-		return effect, healing, not healing and healingAmount or nil, effectDuration
+		return effect, healing, not healing and healingAmount or nil, effectDuration,
+			healing and healingIsAverage or effectIsAverage, not healing and healingIsAverage or nil
 	elseif healingAmount then
-		return healingAmount, true, nil
+		return healingAmount, true, nil, nil, healingIsAverage
 	end
 	return nil, false, nil
 end

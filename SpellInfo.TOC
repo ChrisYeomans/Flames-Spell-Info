@@ -2,15 +2,23 @@
 ## Title: SpellInfo
 ## Notes: Spell information overlays for action-bar icons
 ## Author: Chris Yeomans
-## Version: 0.0.3
+## Version: 0.1.1
 ## RequiredDeps:
 ## X-Curse-Project-ID: 1701163
 ## SavedVariables: SpellInfoDB
 ## SavedVariablesPerCharacter:
 
+ActionBarSpellUtils.lua
 AbilityManaCostIcon.lua
+AbilityRageCostIcon.lua
+AbilityEnergyCostIcon.lua
 SpellDamageTextParser.lua
+SpellPowerCoefficients.generated.lua
 SpellPowerCoefficients.lua
 AbilitySpellDamageIcon.lua
+SpellMetricsUtils.lua
+RageSpellMetrics.lua
+EnergySpellMetrics.lua
+SpellCoefficientTooltip.lua
 SpellMetricsTooltip.lua
 SpellInfoOptions.lua

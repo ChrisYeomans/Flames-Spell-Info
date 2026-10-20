@@ -67,20 +67,7 @@ local function getActionSpell(button)
 		return nil
 	end
 
-	local actionType, spellID
-	if C_ActionBar and C_ActionBar.GetActionInfo then
-		local actionInfo = C_ActionBar.GetActionInfo(actionSlot)
-		if type(actionInfo) == "table" then
-			actionType = actionInfo.actionType or actionInfo.type
-			spellID = actionInfo.spellID or actionInfo.id
-		end
-	end
-
-	if not actionType and GetActionInfo then
-		actionType, spellID = GetActionInfo(actionSlot)
-	end
-
-	return actionType == "spell" and spellID or nil
+	return SpellInfo.GetActionSpell and SpellInfo.GetActionSpell(actionSlot)
 end
 
 local function updateButton(button)

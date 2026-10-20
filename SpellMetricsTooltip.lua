@@ -1,181 +1,157 @@
 SpellInfo = SpellInfo or {}
+local metricsUtils = SpellInfo.SpellMetricsUtils
 
-local function getManaCost(spellID)
-	if not spellID then
-		return nil
-	end
-
-	local getPowerCost = GetSpellPowerCost
-	if not getPowerCost and C_Spell then
-		getPowerCost = C_Spell.GetSpellPowerCost
-	end
-	if not getPowerCost then
-		return nil
-	end
-
-	local powerCosts = getPowerCost(spellID)
-	if not powerCosts then
-		return nil
-	end
-
-	for _, powerCost in ipairs(powerCosts) do
-		if powerCost.type == 0 and powerCost.cost and powerCost.cost > 0 then
-			return powerCost.cost
-		end
-	end
-
-	return nil
-end
-
-local function getCastTime(spellID)
-	if not spellID then
-		return nil
-	end
-
-	if C_Spell and C_Spell.GetSpellInfo then
-		local spellInfo = C_Spell.GetSpellInfo(spellID)
-		if spellInfo and spellInfo.castTime then
-			return spellInfo.castTime / 1000
-		end
-	end
-
-	if GetSpellInfo then
-		local _, _, _, castTime = GetSpellInfo(spellID)
-		if castTime then
-			return castTime / 1000
-		end
-	end
-
-	return nil
-end
-
-local function formatMetric(value)
-	if value == math.floor(value) then
-		return string.format("%.0f", value)
-	end
-
-	if value >= 100 then
-		return string.format("%.0f", value)
-	elseif value >= 10 then
-		return string.format("%.1f", value)
-	end
-	return string.format("%.2f", value)
-end
-
-local function formatCoefficient(baseCoefficient, effectiveCoefficient)
-	local baseText = string.format("%.1f%%", baseCoefficient * 100)
-	if math.abs(baseCoefficient - effectiveCoefficient) < 0.000001 then
-		return baseText
-	end
-	return baseText .. " (" .. string.format("%.1f%% effective", effectiveCoefficient * 100) .. ")"
-end
-
-local function getCurrentMana()
-	return SpellInfo.CurrentMana, SpellInfo.ManaIsEstimated
-end
-
-local manaTracker = CreateFrame("Frame")
-local function updateManaEstimate()
-	if not UnitPower then
-		return
-	end
-
-	local manaType = Enum and Enum.PowerType and Enum.PowerType.Mana or 0
-	local mana = UnitPower("player", manaType)
-	if not issecretvalue or not issecretvalue(mana) then
-		SpellInfo.CurrentMana = mana
-		SpellInfo.ManaIsEstimated = false
-		return
-	end
-
-	if UnitPowerMax then
-		local maximumMana = UnitPowerMax("player", manaType)
-		if not issecretvalue or not issecretvalue(maximumMana) then
-			SpellInfo.CurrentMana = maximumMana
-			SpellInfo.ManaIsEstimated = true
-		end
-	end
-end
-
-if C_Timer and C_Timer.NewTicker then
-	C_Timer.NewTicker(1, updateManaEstimate)
-else
-	manaTracker:SetScript("OnUpdate", function(_, elapsed)
-		manaTracker.elapsed = (manaTracker.elapsed or 0) + elapsed
-		if manaTracker.elapsed < 1 then
-			return
-		end
-		manaTracker.elapsed = 0
-		updateManaEstimate()
-	end)
-end
-
-local function addSpellMetrics(gameTooltip)
+local function addSpellMetrics(gameTooltip, resolvedSpellID)
 	if not gameTooltip or gameTooltip == SpellInfo.DamageAnalysisTooltip
-		or not gameTooltip.GetSpell or not SpellInfo.GetSpellDamage
-		or (SpellInfo.PlayerUsesMana and not SpellInfo.PlayerUsesMana()) then
+		or (not resolvedSpellID and not gameTooltip.GetSpell) or not SpellInfo.GetSpellDamage then
 		return
 	end
 
-	local _, spellID = gameTooltip:GetSpell()
+	local spellID = resolvedSpellID
+	if not spellID then
+		local _, tooltipSpellID = gameTooltip:GetSpell()
+		spellID = tooltipSpellID
+	end
 	if not spellID or (issecretvalue and issecretvalue(spellID)) then
 		return
 	end
-	local effect, healing, alternateHealing, effectDuration = SpellInfo.GetSpellDamage(spellID)
-	local manaCost = getManaCost(spellID)
-	local castTime = getCastTime(spellID)
-	if not effect or not manaCost or not castTime then
+	local rageCost = SpellInfo.GetRageCost and SpellInfo.GetRageCost(spellID)
+	local energyCost = SpellInfo.GetEnergyCost and SpellInfo.GetEnergyCost(spellID)
+	if not rageCost and not energyCost and SpellInfo.PlayerUsesMana and not SpellInfo.PlayerUsesMana() then
 		return
+	end
+	local effect, healing, alternateHealing, effectDuration, isAverage, alternateHealingIsAverage =
+		SpellInfo.GetSpellDamage(spellID)
+	local castTime = metricsUtils.GetCastTime(spellID)
+	if not rageCost and not energyCost and not effectDuration and (not castTime or castTime <= 0.1) then
+		if C_Spell and C_Spell.GetSpellDescription then
+			effectDuration = metricsUtils.ParseEffectDuration(C_Spell.GetSpellDescription(spellID))
+		end
+		if not effectDuration and gameTooltip.GetName and gameTooltip.NumLines then
+			local tooltipName = gameTooltip:GetName()
+			if tooltipName then
+				for index = 1, gameTooltip:NumLines() do
+					local line = _G[tooltipName .. "TextLeft" .. index]
+					if line then
+						local parsedDuration = metricsUtils.ParseEffectDuration(line:GetText())
+						if parsedDuration then
+							effectDuration = parsedDuration
+							break
+						end
+					end
+				end
+			end
+		end
+	end
+
+	if rageCost then
+		return SpellInfo.AddRageMetrics(gameTooltip, spellID, rageCost,
+			effect, healing, castTime, effectDuration, isAverage, metricsUtils.FormatMetric)
+	end
+	if energyCost then
+		return SpellInfo.AddEnergyMetrics(gameTooltip, spellID, energyCost, effect,
+			healing, castTime, effectDuration, isAverage, metricsUtils.FormatMetric)
+	end
+
+	local manaCost = metricsUtils.GetManaCost(spellID)
+	local showCoefficient = not SpellInfo.GetOption or SpellInfo.GetOption("showCoefficient")
+	local showAverageEffect = not SpellInfo.GetOption or SpellInfo.GetOption("showAverageEffect")
+	if not effect then
+		if showCoefficient and SpellInfo.AddSpellCoefficientMetrics
+			and SpellInfo.AddSpellCoefficientMetrics(gameTooltip, spellID, true, metricsUtils.FormatMetric) then
+			return true
+		end
+		return
+	end
+	if not manaCost or not castTime then
+		gameTooltip:AddLine("Spell Metrics", 1, 0.82, 0.25)
+		if showAverageEffect then
+			metricsUtils.AddAverageEffectMetric(
+				gameTooltip, effect, healing, isAverage, metricsUtils.FormatMetric)
+			if alternateHealing then
+				metricsUtils.AddAverageEffectMetric(gameTooltip, alternateHealing, true,
+					alternateHealingIsAverage, metricsUtils.FormatMetric)
+			end
+		end
+		if showCoefficient and SpellInfo.AddSpellCoefficientMetrics then
+			SpellInfo.AddSpellCoefficientMetrics(gameTooltip, spellID, false, metricsUtils.FormatMetric)
+		end
+		return true
 	end
 
 	local castInterval = math.max(castTime, effectDuration or 0, 1.5)
+	local isJudgement = SpellInfo.IsJudgementSpell and SpellInfo.IsJudgementSpell(spellID)
+	local judgementCooldown = 0
+	if isJudgement then
+		judgementCooldown = metricsUtils.GetSpellCooldown(spellID)
+	end
+	local damageInterval = math.max(castInterval, judgementCooldown)
+	local judgementSPPerSecond = isJudgement and SpellInfo.GetJudgementSpellPowerDPS
+		and SpellInfo.GetJudgementSpellPowerDPS(spellID)
 	local showEfficiency = not SpellInfo.GetOption or SpellInfo.GetOption("showEfficiency")
 	local showSustained = not SpellInfo.GetOption or SpellInfo.GetOption("showSustained")
+	local showTick = not SpellInfo.GetOption or SpellInfo.GetOption("showTick")
+	local showBonus = not SpellInfo.GetOption or SpellInfo.GetOption("showBonus")
+	local showCritical = not SpellInfo.GetOption or SpellInfo.GetOption("showCritical")
 	local showOOM = not SpellInfo.GetOption or SpellInfo.GetOption("showOOM")
 	local showCasts = not SpellInfo.GetOption or SpellInfo.GetOption("showCasts")
-	local showCoefficient = not SpellInfo.GetOption or SpellInfo.GetOption("showCoefficient")
-	if not showEfficiency and not showSustained and not showOOM and not showCasts and not showCoefficient then
-		return
-	end
 
 	local function addMetricLine(label, value, valueColor)
 		gameTooltip:AddDoubleLine(label, value, 0.85, 0.85, 0.85, valueColor[1], valueColor[2], valueColor[3])
 	end
 
 	gameTooltip:AddLine("Spell Metrics", 1, 0.82, 0.25)
-	if showCoefficient and SpellInfo.GetSpellCoefficient then
-		local damageBase, damageEffective = SpellInfo.GetSpellCoefficient(spellID, false)
-		local healingBase, healingEffective = SpellInfo.GetSpellCoefficient(spellID, true)
-		if damageBase and healingBase and (healing or alternateHealing) then
-			addMetricLine("Damage SP Coeff", formatCoefficient(damageBase, damageEffective), { 1, 0.75, 0.3 })
-			addMetricLine("Healing SP Coeff", formatCoefficient(healingBase, healingEffective), { 0.35, 1, 0.55 })
-		elseif healing and healingBase then
-			addMetricLine("SP Coeff", formatCoefficient(healingBase, healingEffective), { 0.35, 1, 0.55 })
-		elseif damageBase then
-			addMetricLine("SP Coeff", formatCoefficient(damageBase, damageEffective), { 1, 0.75, 0.3 })
+	if showAverageEffect then
+		metricsUtils.AddAverageEffectMetric(
+			gameTooltip, effect, healing, isAverage, metricsUtils.FormatMetric)
+		if alternateHealing then
+			metricsUtils.AddAverageEffectMetric(gameTooltip, alternateHealing, true,
+				alternateHealingIsAverage, metricsUtils.FormatMetric)
+		end
+	end
+	if showBonus and SpellInfo.GetSpellBonus and SpellInfo.GetSpellBonusTotal and (healing or not healing) then
+		local bonusValue = SpellInfo.GetSpellBonus(spellID, healing == true)
+		local totalSpellPower = SpellInfo.GetSpellBonusTotal(spellID, healing == true)
+		if bonusValue and bonusValue > 0 and totalSpellPower and totalSpellPower > 0 then
+			addMetricLine("Bonus", metricsUtils.FormatMetric(bonusValue) .. " of " .. metricsUtils.FormatMetric(totalSpellPower), healing and { 0.35, 1, 0.55 } or { 1, 0.75, 0.3 })
 		end
 	end
 
-	local currentMana, manaIsEstimated = getCurrentMana()
+	local currentMana, manaIsEstimated = metricsUtils.GetCurrentMana()
 	local castsUntilOOM = currentMana and math.floor(currentMana / manaCost)
 	local estimateSuffix = manaIsEstimated and " (full mana)" or ""
 	local function addEffectMetrics(effectValue, isHealing)
 		local effectPerMana = effectValue / manaCost
-		local effectPerSecond = effectValue / castInterval
+		local effectPerSecond = effectValue / (isJudgement and damageInterval or castInterval)
 		local perManaLabel = isHealing and "HPM" or "DPM"
-		local perSecondLabel = isHealing and "HPS" or "DPS"
+		local perSecondLabel = isHealing and "HPS" or (isJudgement and "Judgement DPS" or "DPS")
 		local untilOOMLabel = isHealing and "HOOM" or "DOOM"
 		local metricColor = isHealing and { 0.35, 1, 0.55 } or { 1, 0.75, 0.3 }
+		if showCritical and SpellInfo.GetSpellSchool and GetSpellCritChance then
+			local school = SpellInfo.GetSpellSchool(spellID, isHealing)
+			local critChance = school and GetSpellCritChance(school)
+			if critChance and critChance > 0 then
+				local spellPowerBonus = SpellInfo.GetSpellBonus
+					and SpellInfo.GetSpellBonus(spellID, isHealing) or 0
+				local critEffect = (effectValue + spellPowerBonus) * 1.5
+				addMetricLine("Crit Chance", metricsUtils.FormatMetric(critChance) .. "%", metricColor)
+				addMetricLine(isHealing and "Crit Healing" or "Crit Damage", metricsUtils.FormatMetric(critEffect), metricColor)
+			end
+		end
 
 		if showEfficiency then
-			addMetricLine(perManaLabel, formatMetric(effectPerMana), metricColor)
+			addMetricLine(perManaLabel, metricsUtils.FormatMetric(effectPerMana), metricColor)
 		end
 		if showSustained then
-			addMetricLine(perSecondLabel, formatMetric(effectPerSecond), metricColor)
+			addMetricLine(perSecondLabel, metricsUtils.FormatMetric(effectPerSecond), metricColor)
+		end
+		local tickValue = metricsUtils.GetTickEffect(gameTooltip, spellID)
+		if showTick and tickValue then
+			addMetricLine((isHealing and "Healing / Tick" or "Damage / Tick"), metricsUtils.FormatMetric(tickValue), metricColor)
 		end
 		if showOOM and castsUntilOOM then
 			local effectUntilOOM = effectValue * castsUntilOOM
-			addMetricLine(untilOOMLabel .. estimateSuffix, formatMetric(effectUntilOOM), metricColor)
+			addMetricLine(untilOOMLabel .. estimateSuffix, metricsUtils.FormatMetric(effectUntilOOM), metricColor)
 		elseif showOOM then
 			addMetricLine(untilOOMLabel, "unavailable", { 0.65, 0.65, 0.65 })
 		end
@@ -190,42 +166,108 @@ local function addSpellMetrics(gameTooltip)
 	elseif showCasts then
 		addMetricLine("Casts to OOM", "unavailable", { 0.65, 0.65, 0.65 })
 	end
-	gameTooltip:Show()
+	if showOOM then
+		if castsUntilOOM then
+			local cooldownInterval, cooldownRemaining = metricsUtils.GetSpellCooldown(spellID)
+			local manaCastInterval = math.max(castTime, 1.5, cooldownInterval)
+			local timeToOOM = cooldownRemaining + castsUntilOOM * manaCastInterval
+			addMetricLine("Time to OOM" .. estimateSuffix, metricsUtils.FormatDuration(timeToOOM), { 0.9, 0.9, 0.9 })
+		else
+			addMetricLine("Time to OOM", "unavailable", { 0.65, 0.65, 0.65 })
+		end
+	end
+	if showCoefficient then
+		SpellInfo.AddSpellCoefficientMetrics(gameTooltip, spellID, false, metricsUtils.FormatMetric)
+	end
 	return true
 end
 
-if GameTooltip and GameTooltip.HookScript then
-	local tooltipCheckElapsed = 0
-	GameTooltip:HookScript("OnUpdate", function(gameTooltip, elapsed)
-		tooltipCheckElapsed = tooltipCheckElapsed + elapsed
-		if tooltipCheckElapsed < 0.2 then
-			return
-		end
-		tooltipCheckElapsed = 0
+local function hasSpellMetricsHeader(gameTooltip)
+	if not gameTooltip.GetName or not _G then
+		return false
+	end
 
-		if not gameTooltip:IsShown() or gameTooltip == SpellInfo.DamageAnalysisTooltip
-			or not gameTooltip.GetSpell then
-			return
-		end
+	local tooltipName = gameTooltip:GetName()
+	if not tooltipName then
+		return false
+	end
 
-		local _, spellID = gameTooltip:GetSpell()
-		if not spellID or (issecretvalue and issecretvalue(spellID)) then
-			return
+	for index = 1, gameTooltip:NumLines() do
+		local line = _G[tooltipName .. "TextLeft" .. index]
+		local text = line and line:GetText()
+		local isLineShown = line and (not line.IsShown or line:IsShown())
+		if isLineShown and text and (not issecretvalue or not issecretvalue(text)) and text == "Spell Metrics" then
+			return true
 		end
+	end
+	return false
+end
 
-		local lineCount = gameTooltip:NumLines()
-		if gameTooltip.spellMetricsSpellID == spellID
-			and gameTooltip.spellMetricsBaseLines
-			and lineCount > gameTooltip.spellMetricsBaseLines then
-			return
-		end
+local function addMetricsForSpell(gameTooltip, spellID, allowHidden)
+	if not gameTooltip or gameTooltip == SpellInfo.DamageAnalysisTooltip
+		or (not allowHidden and (not gameTooltip.IsShown or not gameTooltip:IsShown()))
+		or not spellID or (issecretvalue and issecretvalue(spellID)) then
+		return
+	end
 
-		gameTooltip.spellMetricsSpellID = spellID
-		gameTooltip.spellMetricsBaseLines = lineCount
-		addSpellMetrics(gameTooltip)
-	end)
-	GameTooltip:HookScript("OnHide", function(gameTooltip)
-		gameTooltip.spellMetricsSpellID = nil
-		gameTooltip.spellMetricsBaseLines = nil
-	end)
+	if gameTooltip.spellMetricsSpellID == spellID and hasSpellMetricsHeader(gameTooltip) then
+		return
+	end
+
+	gameTooltip.spellMetricsSpellID = spellID
+	gameTooltip.spellMetricsAdded = addSpellMetrics(gameTooltip, spellID) == true
+end
+
+local function addSpellMetricsToTooltip(gameTooltip)
+	if not gameTooltip or not gameTooltip.GetSpell then
+		return
+	end
+	local _, spellID = gameTooltip:GetSpell()
+	addMetricsForSpell(gameTooltip, spellID, true)
+end
+
+SpellInfo.AddActionSpellMetrics = addMetricsForSpell
+
+local function addActionSlotTooltipMetrics(gameTooltip, actionSlot)
+	local spellID = actionSlot and SpellInfo.GetActionSpell and SpellInfo.GetActionSpell(actionSlot)
+	if not spellID then
+		return
+	end
+
+	local wasShown = gameTooltip and gameTooltip.IsShown and gameTooltip:IsShown()
+	addMetricsForSpell(gameTooltip, spellID, true)
+	if wasShown and gameTooltip.spellMetricsAdded and gameTooltip.Show then
+		gameTooltip:Show()
+	end
+end
+
+SpellInfo.AddActionSlotTooltipMetrics = addActionSlotTooltipMetrics
+
+local function addSpellIDTooltipMetrics(gameTooltip, spellID)
+	local wasShown = gameTooltip and gameTooltip.IsShown and gameTooltip:IsShown()
+	addMetricsForSpell(gameTooltip, spellID, true)
+	if wasShown and gameTooltip.spellMetricsAdded and gameTooltip.Show then
+		gameTooltip:Show()
+	end
+end
+
+if GameTooltip then
+	if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall
+		and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Spell then
+		TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Spell, addSpellMetricsToTooltip)
+	elseif GameTooltip.HookScript then
+		GameTooltip:HookScript("OnTooltipSetSpell", addSpellMetricsToTooltip)
+	end
+	if GameTooltip.HookScript then
+		GameTooltip:HookScript("OnHide", function(gameTooltip)
+			gameTooltip.spellMetricsSpellID = nil
+			gameTooltip.spellMetricsAdded = nil
+		end)
+	end
+	if hooksecurefunc and GameTooltip.SetAction then
+		hooksecurefunc(GameTooltip, "SetAction", addActionSlotTooltipMetrics)
+	end
+	if hooksecurefunc and GameTooltip.SetSpellByID then
+		hooksecurefunc(GameTooltip, "SetSpellByID", addSpellIDTooltipMetrics)
+	end
 end
