@@ -51,7 +51,27 @@ try {
 	if ($outputDirectory) {
 		New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 	}
-	Compress-Archive -Path $stagedAddon -DestinationPath $resolvedOutputPath -Force
+	Add-Type -AssemblyName System.IO.Compression
+	Add-Type -AssemblyName System.IO.Compression.FileSystem
+	$archive = [System.IO.Compression.ZipFile]::Open(
+		$resolvedOutputPath,
+		[System.IO.Compression.ZipArchiveMode]::Create
+	)
+	try {
+		Get-ChildItem -LiteralPath $stagedAddon -File -Recurse | ForEach-Object {
+			$relativePath = $_.FullName.Substring($stagedAddon.Length).TrimStart([char[]]@('\', '/'))
+			$entryName = "$addonName/$relativePath" -replace '\\', '/'
+			[System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+				$archive,
+				$_.FullName,
+				$entryName,
+				[System.IO.Compression.CompressionLevel]::Optimal
+			) | Out-Null
+		}
+	}
+	finally {
+		$archive.Dispose()
+	}
 	Write-Output "Created addon archive: $resolvedOutputPath"
 }
 finally {
